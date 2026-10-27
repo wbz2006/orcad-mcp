@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 生成的手册文本(从本机 OrCAD 安装提取,见 tools/extract_manual.py)
+docs/*.txt
+
+# 本地实验产物 / 截图
+*.png
+*.dat
+*.out
+*.lck
+*.dbk
+DBK/
+*-pspicefiles/
+pins.json
+
+# OrCAD/PSpice 生成的中间文件
+*.opj
+*.dsn
+*.DSN
+
+# 系统
+Thumbs.db
+.DS_Store

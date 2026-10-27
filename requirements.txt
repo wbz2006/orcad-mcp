@@ -1,0 +1,6 @@
+# Core MCP server (run: python server.py)
+mcp>=1,<2
+pywin32
+
+# Optional: extract the official Tcl/Tk manual for tcl_api_search
+# pip install pypdf
