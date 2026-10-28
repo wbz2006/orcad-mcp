@@ -134,10 +134,10 @@ def ensure_capture() -> None:
 
     t = threading.Thread(target=go, daemon=True)
     t.start()
-    t.join(120)
+    t.join(180)
     if status and isinstance(status[0], Exception):
         raise RuntimeError(f"COM Dispatch failed: {status[0]}")
-    for _ in range(90):
+    for _ in range(180):
         if br.BRIDGE.all_sessions():
             return
         time.sleep(1)

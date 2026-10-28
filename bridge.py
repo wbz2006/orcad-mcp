@@ -167,9 +167,9 @@ class Bridge:
                 conn, addr = sock.accept()
             except OSError:
                 return
-            conn.settimeout(10.0)
+            conn.settimeout(60.0)
             session = AgentSession(conn, addr, self)
-            if not session._wait_hello(10.0):
+            if not session._wait_hello(60.0):
                 session.alive = False
                 try:
                     conn.close()
