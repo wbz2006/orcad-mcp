@@ -1,0 +1,17 @@
+activate: True
+[bridge] listening on 127.0.0.1:5178
+[bridge] agent connected pid=964 tcl=8.4.15
+select: 1
+Traceback (most recent call last):
+  File "D:\Main_FIles\free-deng\orcad-mcp\examples\exp3_bjt_ce\elev_run.py", line 16, in <module>
+    runpy.run_path(os.path.join(here, script), run_name="__main__")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen runpy>", line 294, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\Main_FIles\free-deng\orcad-mcp\examples\exp3_bjt_ce\run_sim.py", line 55, in <module>
+    print("run:", s.eval('Menu "PSpice::Run"', 120))
+                  ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Main_FIles\free-deng\orcad-mcp\bridge.py", line 106, in eval
+    raise RuntimeError(f"TCL error: {res}")
+RuntimeError: TCL error: Menu Disabled for Current Selection

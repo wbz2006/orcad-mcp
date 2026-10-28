@@ -1,0 +1,14 @@
+[bridge] listening on 127.0.0.1:5178
+Traceback (most recent call last):
+  File "D:\Main_FIles\free-deng\orcad-mcp\examples\exp3_bjt_ce\elev_run.py", line 16, in <module>
+    runpy.run_path(os.path.join(here, script), run_name="__main__")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen runpy>", line 294, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\Main_FIles\free-deng\orcad-mcp\examples\exp3_bjt_ce\actpage.py", line 9, in <module>
+    dx.ensure_capture()
+    ~~~~~~~~~~~~~~~~~^^
+  File "D:\Main_FIles\free-deng\orcad-mcp\examples\exp3_bjt_ce\draw_exp3.py", line 139, in ensure_capture
+    raise RuntimeError(f"COM Dispatch failed: {status[0]}")
+RuntimeError: COM Dispatch failed: (-2147221005, '无效的类字符串', None, None)

@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "D:\Main_FIles\free-deng\orcad-mcp\examples\exp3_bjt_ce\elev_run.py", line 16, in <module>
+    runpy.run_path(os.path.join(here, script), run_name="__main__")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen runpy>", line 294, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\Main_FIles\free-deng\orcad-mcp\examples\exp3_bjt_ce\actpage2.py", line 13, in <module>
+    win32gui.SetForegroundWindow(frame)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+pywintypes.error: (0, 'SetForegroundWindow', 'No error message is available')

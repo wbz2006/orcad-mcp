@@ -1,0 +1,3 @@
+user=wbz
+SetCursorPos=1
+cursor=700,400

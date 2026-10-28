@@ -1,0 +1,6 @@
+activate: True fg: OrCAD Capture CIS - Lite - [D:\Users\Download\exp3_BJT_CE\exp3.opj]
+[bridge] listening on 127.0.0.1:5178
+[bridge] agent connected pid=964 tcl=8.4.15
+select: 
+page: _305f9d13_p_DboPage
+title: OrCAD Capture CIS - Lite - [/ - (SCHEMATIC1 : PAGE1)]

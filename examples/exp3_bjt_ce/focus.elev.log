@@ -1,0 +1,5 @@
+frame 0x1f1fcc OrCAD Capture CIS - Lite - [Start Page]
+fg 0x1f1fcc
+rect (-7, -7, 1714, 1026)
+fg after click 0x1f1fcc
+title OrCAD Capture CIS - Lite - [Start Page]

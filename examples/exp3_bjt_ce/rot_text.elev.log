@@ -1,0 +1,4 @@
+[bridge] listening on 127.0.0.1:5178
+[bridge] agent connected pid=44316 tcl=8.4.15
+tcl: {value id=1785}
+rotate: 1
