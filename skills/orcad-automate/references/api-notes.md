@@ -331,3 +331,22 @@ python orcad_quiet.py --dat tran.dat --out out_tran.pdf ^
   实测有效——多线汇聚点没有圆点时,视觉上分不清"相连"与"交叉"。
 - 典型漏接线模式:**电源符号的负极**。画了 V1+→负载轨就以为回路闭合,
   返回路径(V1−→地)最容易漏;审计会直接点名"元件@(690,140) 引脚@(700,180) 悬空"。
+
+## 按手册图复刻布局的实证补充 (2026-10-29 第二轮)
+
+- **SetLocation 签名分家**:`DboPartInst`/`DboGlobal`(DboNetSymbolInstance 系)的
+  `SetLocation(location)` **不带 status**;带 `$_st` 报 "Wrong # args"。
+  DboPlacedInst 的带 status(以实测为准,错了看报错参数个数)。
+- **PlaceWire 会自动分段**:走线跨越其它导线端点/结点时被拆成多段
+  (如 (620,470)-(700,470) 经 (650,470) 分两段)。删线必须先 dump 现状拿真实端点,
+  不能凭"我放过的坐标"猜。
+- **圆点是自动的**:≥3 条线/引脚汇聚 Capture 自动渲染连接圆点,不需要 junction
+  对象;**T 型接入(端点落在另一根线中间)才必须 PlaceJunction**(电气需要,
+  非显示)。PlaceJunction 在已有自动圆点的点可能静默不建对象——无害。
+- **Tcl 8.4 expr 没有 min/max**(8.5 才有),用三元 `? :` 替代。
+- **结点探测正道**:`DboWire.PointIsJunction(point,status)`(DboWire 还有
+  `RemoveExtraJunctions`/`JunctionOnWire`);页面级没有可用的 junction 枚举
+  (NewJunctionsIter 不存在,NewObjectsAtPointIter 只返回端点对象)。
+- **移动元件带位号/值文本一起走**,已放置元件平移安全;值类操作无崩溃风险。
+- 对照手册图复核时,先比"拓扑骨架"(同轴/直落/母线拉通/地挂母线)再比标签位置;
+  交付前跑 `sch_connectivity_audit.py` + 渲染对照,两道闸都过才算完。
