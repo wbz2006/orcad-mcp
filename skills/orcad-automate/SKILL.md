@@ -38,6 +38,9 @@ https://github.com/wbz2006/orcad-mcp (新机器先 clone + `pip install -r requi
   `save_verified(s,dsn)`(File::Save + **mtime 核验落盘**)、
   `health([dsn])`(进程/假死/僵尸/残留锁/agent RTT 一屏体检)。
   CLI: `python capture_guard.py health <dsn路径>` / `reap [--dry]`。
+- **`sch_connectivity_audit.py` — 原理图连通性裁决标准(画完必跑)**:并查集引脚级审计
+  (引脚热点↔导线端点↔结点),报告悬空引脚/T触无结点/十字交叉。目视与放大 PDF 都有盲区
+  (V1 负极红竖线曾被误读为电池符号图形)。
 - `print_export.py` / `cap_print.py` — 打印底层函数、Capture 重启恢复(旧路径)。
 - `examples/exp3_bjt_ce/` — 画图/连线/属性的历史脚本(`tclrun.py` 可跑无 BOM 的 .tcl)。
 

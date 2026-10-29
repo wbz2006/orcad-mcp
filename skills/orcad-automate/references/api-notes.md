@@ -311,3 +311,23 @@ python orcad_quiet.py --dat tran.dat --out out_tran.pdf ^
 - BM_CLICK 一律走 SendMessageTimeoutW(SMTO_ABORTIFHUNG, 3s)——对可能假死的窗口
   裸 SendMessage 会把自己也挂死(capture_guard._msg 已封装)。
 - 僵尸判定 = exe_pids() − capture_pids()(有映像无窗口);tasklist 慢,只在 health 用。
+
+## 连通性裁决标准:引脚级审计 (2026-10-29, sch_connectivity_audit.py)
+
+- **目视与放大 PDF 核验都有盲区**。实验4 实证:V1(5V) 负极悬空,红竖线贴着电池符号,
+  两轮 150dpi 放大核验都把它误读为符号自身图形;用户目视反而发现了。
+- **画完/改完原理图必跑** `python sch_connectivity_audit.py PAGE1 ...`:
+  dump 引脚热点(GetOffsetHotSpot)+导线端点+结点 → 并查集 → 报告
+  悬空引脚(按宿主元件位置)/T-TOUCH无结点(端点落另一根线中间且无结点=电气断开)/
+  十字交叉(提示,不连通)。
+- 判据细节(踩过的坑):
+  - 引脚列表被逗号拍平:解析时按数字两两成对还原;
+  - **悬空判定是 `p not in ep_map and find(p)==p`**,不是 `find(p)==p`——
+    引脚坐标恰好是连通组树根时后者误报(导线 END 点常成为根);
+  - 端点-端点/端点-引脚同坐标即连通,无需结点对象;结点只影响 T 触与显示。
+- 结点 API 勘误:DboPage **没有 NewJunctionsIter**(appendixB 手册写错类);
+  用 `IsConnectionPoint(point,status)`/`NewObjectsAtPointIter`(迭代器方法是
+  Next/GetKey/GetType,不是 GetFirstOf)。补圆点用 agent 命令 `PlaceJunction x y`(英寸),
+  实测有效——多线汇聚点没有圆点时,视觉上分不清"相连"与"交叉"。
+- 典型漏接线模式:**电源符号的负极**。画了 V1+→负载轨就以为回路闭合,
+  返回路径(V1−→地)最容易漏;审计会直接点名"元件@(690,140) 引脚@(700,180) 悬空"。
