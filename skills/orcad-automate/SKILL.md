@@ -32,6 +32,12 @@ https://github.com/wbz2006/orcad-mcp (新机器先 clone + `pip install -r requi
   任意已打开文档做消息驱动打印到 PDF(File>Print→BM_CLICK→Save As 填路径)。
 - `probe_export.py` — 物理点击模式(需要前台,仅限用户可让出电脑时;Probe 内原生标注)。
 - `tcl/prep_ic_loaded.tcl` — 参数化 IC 档切换(Rb1/VAMPL/RL/别名改名,带回读)。
+- **`capture_guard.py` — 卡顿/意外弹窗防护(所有长流程必用)**:
+  `eval_safe(s,tcl)`(超时→自动收割意外弹窗→重试;agent 断线→等 4s 自愈;
+  TCL 脚本错误→立即抛,不浪费重试)、`reap()`(按语义表收割 #32770)、
+  `save_verified(s,dsn)`(File::Save + **mtime 核验落盘**)、
+  `health([dsn])`(进程/假死/僵尸/残留锁/agent RTT 一屏体检)。
+  CLI: `python capture_guard.py health <dsn路径>` / `reap [--dry]`。
 - `print_export.py` / `cap_print.py` — 打印底层函数、Capture 重启恢复(旧路径)。
 - `examples/exp3_bjt_ce/` — 画图/连线/属性的历史脚本(`tclrun.py` 可跑无 BOM 的 .tcl)。
 
@@ -68,9 +74,17 @@ https://github.com/wbz2006/orcad-mcp (新机器先 clone + `pip install -r requi
   崩溃后:删 .DSNlck → 重启 opj → ORCAP-1680 选"否"加载磁盘态 → 重做。
 - "删除电阻并桥接"实测配方:DBO 只读拿到两端导线 ID 与 Rs 元件 ID →
   原生 Delete×3 → PlaceWire 桥接 → 值类 DBO 修改 → **保存**。
-- **保存**:`Menu "File::Save"` 会崩(即使结构修改全走原生事务);可靠路径 =
-  DB 改完 → `$pg MarkModified` → 让 Capture 前台后发 **Ctrl+S**。窗口标题没有 `*`
-  不代表已保存,**以 .DSN 的 mtime 为准**。
+- **保存**:`Menu "File::Save"` 的历史崩溃与 DBO 结构性写同源——纯原生事务流程下
+  (实验4)已连续稳定使用数十次。可靠姿势 = **`save_verified(s, dsn)`**(内部
+  File::Save + 等 .DSN mtime 前进,被弹窗挡住时给诊断);批量改动后也可
+  `$pg MarkModified` + 前台 Ctrl+S。**窗口标题没有 `*` 不代表已保存,以 mtime 为准**;
+  save_verified 返回 "no-change" = 无修改可存,不是故障。
+- **卡顿治理三守则**(模态框/假死/僵尸是"卡很久"的全部根因):
+  1. **所有 eval 走 `eval_safe`**,裸 eval 超时 30s×N 次循环就是"卡很久"的主因;
+  2. **批量操作前先 `health(dsn)` 体检**(僵尸进程/残留锁/假死提前现形);
+  3. **恢复阶梯**:reap(清意外弹窗)→ health 看假死/僵尸/残留锁 →
+     `taskkill /IM Capture.exe /F` + 删 .DSNlck + `cap_open.py` 重启。
+     每一步等待都必须有 deadline,禁止无上限的 while 轮询。
 - **旋转**:`$inst SetRotation 0..3` 会把位号/值文本一起转,且**不能修复"文本竖排"**
   (见 api-notes 已知缺陷)。已放置元件位置用 `SetLocation`;方向尽量在
   `NewPlacedInst` 的 rotation 参数一次定好,不要事后再转。
@@ -109,6 +123,10 @@ https://github.com/wbz2006/orcad-mcp (新机器先 clone + `pip install -r requi
 
 | 症状 | 原因/处理 |
 |---|---|
+| eval 一卡 30 秒、反复超时 | 模态框饿死 agent;用 `eval_safe`(自动 reap+重试),禁止裸 eval 循环 |
+| Capture 整个无响应(消息也不回) | 主窗口假死 IsHungAppWindow;消息路径已无效 → taskkill+删锁+cap_open.py |
+| tasklist 里多个 Capture.exe | 僵尸进程干扰判断;`health()` 列出,杀掉非窗口属主再操作 |
+| 保存后不确定存没存上 | `save_verified` 看 .DSN mtime;标题无 `*` 不可信 |
 | 冷启动后 session() 一直超时 | Capture 进程环境没带 `ORCAD_MCP_PORT`(agent 连了 5177);用 `cap_open.py` |
 | agent 连不上/断开 | 模态对话框(先枚举 #32770 处理);端口被 MCP server 占用(直接用 MCP 工具) |
 | TCL 超时 30s | 被模态框卡住;枚举 #32770 → 读文本 → 点正确按钮 |

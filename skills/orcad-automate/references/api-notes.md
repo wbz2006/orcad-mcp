@@ -267,3 +267,47 @@ python orcad_quiet.py --dat tran.dat --out out_tran.pdf ^
   **每页恰好 14 根导线 = 重构完整**;数不对就 diff 端点找缺段。
 - 打印/核验分工:GUI 连通性错误只影响原理图 PDF;若仿真数据来自自包含 .cir
   (psp_cmd 复跑),页面断线不影响已交付数据——先修图,不必重跑仿真。
+
+## 卡顿与意外弹窗:硬超时与自动恢复 (2026-10-29, capture_guard.py)
+
+**"卡很久"只有四类根因**,全部有对策,不要每次重新猜:
+(a) 模态对话框饿死 agent 定时器 → 每次 eval 白等 30s 超时,脚本里连环 eval 就是连环卡;
+(b) 主窗口真假死(IsHungAppWindow 为真)→ 任何 SendMessage 都无响应,消息路径已失效;
+(c) 僵尸 Capture 进程/残留 .DSNlck → 下一次自动化连错对象或带病打开;
+(d) 保存被弹窗/死锁挡住 → 脚本不知情继续跑,错误滞后爆发。
+
+### 四个原语(所有长流程改用,别再裸写)
+
+- `capture_guard.eval_safe(s, tcl, timeout=20, retries=2)`:超时→reap→重试;
+  agent disconnected→等 4s 自愈重连再试;**TCL error 立即抛**(确定性脚本错误,
+  重试只会 20s×N 浪费)。彻底失败时异常里带残余弹窗清单和恢复阶梯。
+- `capture_guard.reap(expected=EXPECTED_TITLES, dry=False)`:枚举 Capture pid 名下
+  可见 #32770,按语义表点按钮。打印/另存为/打开等**流程预期弹窗永远跳过**
+  (点错毁掉进行中的流程);收割不动的残弹窗会在 eval_safe 失败诊断里列出。
+- `capture_guard.save_verified(s, dsn_path)`:File::Save(带弹窗恢复)→ 轮询
+  .DSN mtime(settle=10s)。返回 'saved'/'no-change'(无修改可存,非故障);
+  mtime 不动且存在弹窗时抛诊断(另存为=设计未命名,需流程显式给路径)。
+- `capture_guard.health(opj=None)`:一屏体检——主窗口/假死/僵尸/弹窗/残留锁
+  (锁在 Capture 运行中=正常)/agent ping。CLI: `python capture_guard.py health <dsn>`。
+
+### reap 语义表(历史实证)
+
+| 弹窗特征 | 自动动作 |
+|---|---|
+| 标题含 ORCAP-1680(是/否) | 点**否**(加载磁盘态,不恢复未保存修改) |
+| 上次异常关闭提示(确定/取消) | 点**确定**(加载磁盘态;取消会留在 Start Page) |
+| Save changes / 保存更改 | 默认点**是**(保住已改内容;故意丢弃时传 save_changes=False) |
+| 崩溃报告/已停止工作 | 点**关闭** |
+| 其余未知 | 点 IDOK(1),无则第一个按钮;全部记录到返回值 |
+| 标题命中 EXPECTED_TITLES | **不动**(那是打印/另存为/打开等流程自己的弹窗) |
+
+### 实践守则
+
+- 裸 `s.eval` 只允许出现在一行式试探里;任何循环/批量流程必须 eval_safe。
+- 每个等待都要有 deadline + 升级路径(reap→health→taskkill+删锁+cap_open.py),
+  禁止无上限 while 轮询;eval 单次 ≤20s(默认),不要为了"保险"调到 60s——
+  那正是卡顿时长的来源。
+- 批量操作(重构/多页打印)前跑一次 `health(dsn)`;结束后再跑一次确认无残留。
+- BM_CLICK 一律走 SendMessageTimeoutW(SMTO_ABORTIFHUNG, 3s)——对可能假死的窗口
+  裸 SendMessage 会把自己也挂死(capture_guard._msg 已封装)。
+- 僵尸判定 = exe_pids() − capture_pids()(有映像无窗口);tasklist 慢,只在 health 用。
