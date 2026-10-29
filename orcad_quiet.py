@@ -256,6 +256,17 @@ def pdf_has(target, *keys):
     return all(flat(k) in flat(t) for k in keys)
 
 
+def set_bw(dlg):
+    """打印对话框 'Number of Trace Colors' 设 0 => 黑白前景(实验要求白底黑字)。"""
+    e = next((w for w in pe.child_list(dlg)
+              if win32gui.GetClassName(w) == 'Edit' and win32gui.GetDlgCtrlID(w) == 1162), None)
+    if e:
+        win32gui.SendMessage(e, win32con.WM_SETTEXT, 0, '0')
+        time.sleep(0.2)
+        return True
+    return False
+
+
 def quiet_print(h, target, want):
     if os.path.exists(target): os.remove(target)   # 防覆盖确认框
     pe.menu_cmd(h, 'File', 'Print')
@@ -266,6 +277,7 @@ def quiet_print(h, target, want):
         idx = lb_pick_by_text(lb, want)
         lb_select(lb, idx)
         time.sleep(0.3)
+    set_bw(d)
     bg_ok(d)
     time.sleep(0.8)
     d2 = find_dlg(pe.is_saveas_dlg, 12)
@@ -297,6 +309,7 @@ def quiet_print(h, target, want):
         idx = lb_pick_by_text(lb, want)
         lb_select(lb, idx)
         time.sleep(0.3)
+    set_bw(d)
     bg_ok(d)
     time.sleep(0.8)
     d2 = find_dlg(pe.is_saveas_dlg, 12)
@@ -327,6 +340,38 @@ def _cjk_font():
     return 'china-s', None
 
 
+def thicken_trace(pdf, width_pt=1.2, min_segs=20):
+    """加粗数据曲线:Probe 打印输出把所有描边都压成 hairline(0.5 用户单位),
+    这里只对"含 >= min_segs 段 l 的路径"(=数据曲线)提高描边宽度,网格/边框不动。
+    数据本身仍是 PSpice 原打印内容,只做线宽美化。"""
+    import pymupdf, re
+    doc = pymupdf.open(pdf)
+    page = doc[0]
+    page.clean_contents()
+    xref = page.get_contents()[0]
+    s = doc.xref_stream(xref).decode('latin-1')
+    w = width_pt / 0.75          # 打印 CTM 为 0.75, 换算到用户单位
+    pat = re.compile(r'((?:-?\d+(?:\.\d+)? -?\d+(?:\.\d+)? [ml]\s*)+)S')
+    cnt = [0]
+
+    def rep(m):
+        body = m.group(1)
+        if body.count(' l') < min_segs:
+            return m.group(0)
+        cnt[0] += 1
+        return body + f'{w:.3f} w S 0.5 w'
+
+    s2 = pat.sub(rep, s)
+    if cnt[0]:
+        doc.update_stream(xref, s2.encode('latin-1'))
+        doc.save(pdf + '.thick', garbage=4, deflate=True)
+        doc.close()
+        os.replace(pdf + '.thick', pdf)
+    else:
+        doc.close()
+    return cnt[0]
+
+
 def annotate_pdf(pdf, caption=None, name=None):
     """在打印出的 PDF 上叠写标注(等比定位:图题左上、班级姓名右上)。
     Probe 内标注的 move-mode 放置依赖真实光标, 无法后台化; PDF 叠写是
@@ -336,13 +381,13 @@ def annotate_pdf(pdf, caption=None, name=None):
     page = doc[0]
     W, H = page.rect.width, page.rect.height
     fontname, fontfile = _cjk_font()
-    kw = dict(fontsize=10.5, fontname=fontname, color=(0.55, 0, 0))
+    kw = dict(fontsize=11.5, fontname=fontname, color=(0, 0, 0))
     if fontfile:
         kw['fontfile'] = fontfile
     if caption:
         page.insert_text((W * 0.04, H * 0.035), caption, **kw)
     if name:
-        kw['color'] = (0, 0.45, 0)
+        kw['color'] = (0, 0, 0)
         page.insert_text((W * 0.78, H * 0.035), name, **kw)
     tmp = pdf + '.annot'
     if fontfile and (caption or name):
@@ -375,6 +420,7 @@ def quiet_export(dat, out, traces, caption=None, name=None, two_frame=False):
         if ok: break
     if not ok or not os.path.exists(out): return None
     # 标注: 安静模式用 PDF 叠写(move-mode 放置依赖真实光标, 无法后台化)
+    thicken_trace(out, 1.2)
     annotate_pdf(out, caption, name)
     if not pdf_has(out, *( [k for k in (caption, name) if k] )):
         return None
