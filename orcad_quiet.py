@@ -251,7 +251,9 @@ def pdf_has(target, *keys):
     doc = pymupdf.open(target)
     t = doc[0].get_text()
     doc.close()
-    return all(k in t for k in keys)
+    # 中文 TTF 常把空格映射成 U+00A0;按"去空白"比较,避免标注核验误判
+    flat = lambda s: ''.join(s.split())
+    return all(flat(k) in flat(t) for k in keys)
 
 
 def quiet_print(h, target, want):
@@ -315,22 +317,43 @@ def quiet_print(h, target, want):
     return want in head
 
 
+def _cjk_font():
+    """返回 (fontname, fontfile):优先系统中文字体,避免内置 china-s 的字距拉宽。"""
+    for f in (r'C:\Windows\Fonts\msyh.ttc',
+              r'C:\Windows\Fonts\simsun.ttc',
+              r'C:\Windows\Fonts\simhei.ttf'):
+        if os.path.exists(f):
+            return 'cjk', f
+    return 'china-s', None
+
+
 def annotate_pdf(pdf, caption=None, name=None):
-    """在打印出的 PDF 上叠写标注(等比定位: 图题左上、班级姓名右上)。
+    """在打印出的 PDF 上叠写标注(等比定位:图题左上、班级姓名右上)。
     Probe 内标注的 move-mode 放置依赖真实光标, 无法后台化; PDF 叠写是
     安静模式下的替代, 波形本体仍是软件原打印。"""
     import pymupdf
     doc = pymupdf.open(pdf)
     page = doc[0]
     W, H = page.rect.width, page.rect.height
+    fontname, fontfile = _cjk_font()
+    kw = dict(fontsize=10.5, fontname=fontname, color=(0.55, 0, 0))
+    if fontfile:
+        kw['fontfile'] = fontfile
     if caption:
-        page.insert_text((W * 0.30, H * 0.14), caption, fontsize=11,
-                         fontname='china-s', color=(0.55, 0, 0))
+        page.insert_text((W * 0.04, H * 0.035), caption, **kw)
     if name:
-        page.insert_text((W * 0.62, H * 0.14), name, fontsize=11,
-                         fontname='china-s', color=(0, 0.45, 0))
+        kw['color'] = (0, 0.45, 0)
+        page.insert_text((W * 0.78, H * 0.035), name, **kw)
     tmp = pdf + '.annot'
-    doc.save(tmp)
+    if fontfile and (caption or name):
+        # 嵌入的中文 TTC 默认整包 ~19MB;subset 后约 40KB
+        try:
+            doc.subset_fonts()
+        except Exception:
+            pass
+        doc.save(tmp, garbage=4, deflate=True)
+    else:
+        doc.save(tmp)
     doc.close()
     os.replace(tmp, pdf)
 
@@ -356,3 +379,34 @@ def quiet_export(dat, out, traces, caption=None, name=None, two_frame=False):
     if not pdf_has(out, *( [k for k in (caption, name) if k] )):
         return None
     return out
+
+
+def _cli():
+    """命令行入口(安静模式), 供 skill/脚本直接调用:
+
+      python orcad_quiet.py --dat tran.dat --out 图.pdf \
+          --traces V(Vs) V(Vi) V(Vo) --caption "..." --name "信255 王保哲" [--two-frame]
+
+    PSpice A/D(Probe) 需已打开目标 dat(可用 quiet_open_dat 或直接 pspice.exe dat)。
+    """
+    import argparse, sys
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+    ap = argparse.ArgumentParser(description='quiet Probe export to PDF')
+    ap.add_argument('--dat', required=True, help='tran.dat 全路径')
+    ap.add_argument('--out', required=True, help='输出 PDF 全路径')
+    ap.add_argument('--traces', nargs='+', default=['V(Vo)'])
+    ap.add_argument('--caption', default=None)
+    ap.add_argument('--name', default=None)
+    ap.add_argument('--two-frame', action='store_true')
+    a = ap.parse_args()
+    res = quiet_export(a.dat, a.out, a.traces, caption=a.caption,
+                       name=a.name, two_frame=a.two_frame)
+    print(res if res else 'FAILED')
+    return 0 if res else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(_cli())
