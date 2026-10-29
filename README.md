@@ -58,6 +58,30 @@ python tools\extract_manual.py
 | `open_design` / `save_design` | 打开 .dsn / 保存 |
 | `run_menu` | 触发任意菜单命令(如 `Tools::Annotate`) |
 
+## AI Skill(方法论)/ Agent skill
+
+仓库里除了 MCP 代码,还发布一套**给 AI 会话读的方法论**：
+[`skills/orcad-automate/`](skills/orcad-automate/SKILL.md)。它把踩过的坑固化成可执行流程
+（软件自身打印导出、安静模式、原生事务改图、崩溃恢复、故障速查表），换任何一个 AI IDE
+接手都不用从零试错。
+
+```bat
+:: 安装到本机 skills 目录,AI 会在涉及 OrCAD/PSpice 的对话中自动加载
+xcopy /E /I skills\orcad-automate %USERPROFILE%\.agents\skills\orcad-automate
+```
+
+| 文件 | 内容 |
+|---|---|
+| `SKILL.md` | 主流程:连接 → 画图/改图 → 仿真 → **软件自身打印导出** → 安静模式 → 故障速查 |
+| `references/api-notes.md` | Tcl/Dbo 精确签名、坐标约定、打印对话框自动化、Probe 标注、崩溃恢复等详单 |
+
+两个关键设计(实战验证):
+
+- **安静模式**(`orcad_quiet.py`):全程窗口消息驱动,不置顶/不抢焦点/不动鼠标,
+  可以边跑自动化边用电脑;
+- **软件自身导出**:波形/原理图/工作点全部走 `Microsoft Print to PDF`,
+  不是脚本重绘——报告里的图与软件打印件逐像素一致。
+
 ## 快速上手 / Quick start(对话示例)
 
 - 「启动 Capture 并打开 `D:\x\demo.dsn`,列出所有元件」
@@ -89,6 +113,13 @@ python tools\extract_manual.py
   `pspice\psp_cmd.exe -r file.cir`(.out 格式与 GUI 完全一致,更适合 AI 消费)。
 - **获取命令词汇**:`SetOptionBool Journaling TRUE` 后,任何 UI 操作都会以 TCL 形式
   记录到 `%TEMP%\CAPTURELOG\OrCaptureLogFile.captcl`——照抄即可复现。
+- **结构性修改(删元件/删线/建线)不要用 Dbo 写接口**(会破坏库里一致性,保存时 Capture
+  崩溃退出):改走原生事务 `SelectObjectById <id>` + `Menu "Edit::Delete"`、官方 `PlaceWire`;
+  值类修改(`SetEffectivePropStringValue`)是安全的。
+- **打印对话框的 Plots to Print 列表**在多窗口时不可靠 → 打印前把目标窗口留成唯一子窗口。
+- **.cir 注释一律 ASCII**:psp_cmd 按 ANSI 读文件,UTF-8 中文会乱码并印进报告 PDF。
+
+完整清单见 [`skills/orcad-automate/references/api-notes.md`](skills/orcad-automate/references/api-notes.md)。
 
 ## 示例 / Examples
 

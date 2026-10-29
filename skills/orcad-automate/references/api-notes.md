@@ -1,0 +1,251 @@
+# OrCAD Capture 16.6 自动化 API 笔记(实测确认)
+
+来源:官方《OrCAD Capture Tcl/Tk Extensions》(922 页,随产品附带)+ 逆向验证。
+提取脚本:`tools/extract_manual.py`(生成 docs/appendixA/B/C 全集,可 grep)。
+
+## 坐标与单位(最容易踩的坑)
+
+- 页面坐标 **y 向下**:y 小 = 屏幕上方。Vcc/电源轨用小 y,地用大 y。
+- doc 单位:100/英寸(粒度 `$page GetPhysicalGranularity`)。
+- 各接口单位不同:
+  - `PlaceWire/PlaceJunction/PlaceGround/PlaceNetAlias/PlaceText/PlacePart`:**英寸**(double)
+  - Dbo `SetLocation`/`NewPlacedInst` 的 CPoint:**doc 整数**(英寸×100)
+  - `Move dx dy 0`:**相对英寸**(但实测不可靠,勿用)
+- 引脚真实页面坐标:`$pin GetOffsetHotSpot $st`(CPoint,doc);`GetStartPoint` 是符号系
+  (旋转后不随页面变)。旋转 90° 后引脚绕符号体中心转(竖置 R 引脚跨 0.4")。
+
+## 对象获取惯用法
+
+```tcl
+set _s $::DboSession_s_pDboSession
+DboSession -this $_s
+set st [DboState]
+# 遍历设计 → 原理图 → 页
+set dit [$_s NewDesignsIter $st]         ;# 设计名常为大写全路径,用 string match -nocase
+# 页上元件:
+set iit [$pg NewPartInstsIter $st]
+set pl  [DboPartInstToDboPlacedInst $i]  ;# 转型,否则是基类
+$pl GetReference $c;  DboTclHelper_sGetConstCharPtr $c   ;# CString 都这样读
+```
+
+- 未知对象的方法表:对它调 `ZZZBogus`,错误信息会列出全部合法方法名。
+- 迭代器用完 `delete_DboXxxIter $it`;DboState 用 `[$st OK]` 判断。
+- 脚本顶层 `return` 经 `uplevel #0` 会被 catch 判为错误——包一层 proc。
+
+## 放置
+
+- 可 PlaceNew 的库:`analog.olb`(R/C/L...)、`eval.olb`(Q2N3904...)、`breakout.olb`,
+  路径 `tools\capture\library\pspice\`;**source.olb(VSIN/VDC)PlaceNew 必失败**;
+  **capsym.olb**(地/电源符号)用 `PlaceGround x y capsym GND_POWER 0` / `PlacePower`。
+- `PlaceNew <olb> <件名> [deviceIndex]` → 真实鼠标点击提交 → `EndPlace`。
+  落点 = 当前光标的页面映射位置(固定光标则固定落点);之后 SetLocation 摆到位。
+- Macro Player `PlacePart(x,y,lib,pkg,dev,bool6)` 对未注册库静默失败(Object Not Found)。
+- 复制现有实例:`$dstPage NewPlacedInst $srcInst $st [CPoint]`(同设计可靠;
+  ptOffset 是**相对源位置**的偏移,复制后 SetLocation 校正)。
+- 符号件名带 `.Normal` 后缀(GetPart 需要:`R` → `R.Normal`)。
+
+## 修改
+
+- 属性:`$inst SetEffectivePropStringValue [CStr name] [CStr value]`
+  位号属性名 = `Reference`;改完 `$pl GetReference` 回读验证。
+- 位置:`$inst SetLocation [DboTclHelper_sMakeCPoint x y]`(doc 整数)。
+  用户命令 `Move`/`SelectObjectById+Move` 在重开工程后经常静默失效,勿依赖。
+- 旋转:`$inst SetRotation 0..3`(0=符号原始方向;R 原始为水平)。
+- 模型参数:复制 eval.lib 的 .MODEL 改参数存 .inc,网表里 **`.INC` 后置覆盖生效,
+  `.LIB` 后置不生效**。Lite 安装缺 `nom.lib` → 在 `tools/pspice/library/` 补建:
+  一行 `.lib "nom_eval.lib"`。
+
+## 工程结构
+
+- `.opj` 是纯文本 s-表达式(可手工构造):ProjectType "Analog or A/D Mixed Mode" +
+  `(File ".\x.dsn" (Type "Schematic Design"))` + PSpice Resources(仿真 profile 用
+  `File.PSpice.{09528990-3187-11D2-BC7B-00A0C90CBF91}` 节点,ActiveProfile 指向 .sim)。
+- `.dsn`:OLE 结构存储,不可手写 —— 复制现成 .dsn(如 learning resources 的
+  accircuits.dsn)改名做底,再 NewSchematic/NewPage/SetRoot 换成自己的页。
+- `.sim` profile 是文本(@Analysis: 0=瞬态 2=DC 3=Bias Point,`+0 "5ms"` 等字段);
+  可手工构造,但 dsn 缺失时打开工程会弹 profile 初始化错误(模态!)。
+- capAutoLoad 下所有 .tcl 启动自动 source(官方机制);agent 放这里。
+- 本机 Lite 安装 **缺 nom.lib**(网表固定引用):补建 `tools/pspice/library/nom.lib`
+  内容 `.lib "nom_eval.lib"`。
+
+## 仿真
+
+- 命令行:`tools\pspice\psp_cmd.exe -r file.cir`(.out/.dat 生成在 .cir 同目录)。
+- .PRINT 语法:**节点电压用方括号 `V[node]` 或 `V[n1,n2]`**;圆括号 `V(x)` 是器件电压
+  (会报 "Must be a two terminal device")。
+- 模型覆盖:`.LIB eval.lib` + `.INC 覆盖.inc`(后置 .MODEL 生效)。
+- Capture 内运行:`Menu "PSpice::Run"` —— 需要 PM 选中 profile 且无 TCL 上下文问题,
+  经常报 Menu Disabled;命令行更可靠。
+- Journaling:`SetOptionBool Journaling TRUE` → UI 操作记录 TCL 到
+  `%TEMP%\CAPTURELOG\OrCaptureLogFile.captcl`。
+
+## 稳定性
+
+- **模态对话框阻塞 TCL 事件循环**(after/fileevent 全停)→ agent 假死。
+  外部收割线程(win32 EnumWindows + BM_CLICK)是必需品;规则按语义:
+  "recovered"→否 / "Save changes"→是 / 其他→确定;子串匹配按钮文本。
+- 视图(ZoomScale/ZoomSelection/Menu View::Zoom)可能永久失效 —— 与 DB 无关,
+  验证与导出全部走 DB + 外部渲染,不要依赖屏幕。
+- Capture 的 COM `Quit()` 在部分场景抛错;taskkill /IM Capture.exe 兜底(注意先保存)。
+- Capture.exe 的 RUNASADMIN 兼容标记会阻断 COM 启动(ERROR_ELEVATION_REQUIRED):
+  删除 `HKCU\...\AppCompatFlags\Layers` 对应值。
+
+## v4 实战补充(2026-10-28)
+
+- **source.olb 可以 PlaceNew**:之前的失败是混乱会话(错误活动页/多工程切换)的副作用。
+  在干净单工程会话、页面窗口激活、ID差集检测下,VSIN/VDC 均**一次成功**。
+- **新元件检测必须用 ID 差集**(放置前后集合差),不要用坐标启发。
+- **重复/多余实例可删**:`SelectObjectById id` + `Menu "Edit::Delete"`。
+- **SNUBBER/accircuits 等教程设计的页面是巨页**(164×104"),复制底图后要
+  `$pg SetPageWidth 1100 / SetPageHeight 850` 改成 Letter。ABC.DSN 页面本身正常(1100×850)。
+- **视图毒化**:ZoomScale/ZoomArea/ZoomAll/ZoomSelection 一旦调用,页面渲染可能永久冻结
+  (保存进 DSN,重开依旧),且滚轮/键盘/TCL 缩放全部失效——**自动化中禁用一切缩放命令**。
+- 跨设计 `NewPlacedInst(src, st, offset)` 实际可用(before/after 计数验证);
+  offset 是相对源位置的偏移,复制后需 SetLocation。
+- **元素删除**:`SelectObjectById` + `Menu "Edit::Delete"`(wire 也能删?未验证,元件已验证)。
+- 打开第二工程后,活动页会漂移:GetActivePage 前先 CloseProject(第2个工程)再 SelectPMItem。
+- PSpice::Run 菜单在 TCL 会话中始终 Disabled(原因未明);psp_cmd 命令行是可靠替代。
+- Probe(tclscripts/pspAuto)支持脚本化,Add Traces 对话框可 win32 点击自动化,
+  但表达式框 WM_SETTEXT 会被 MFC 重置,需真实键盘;时间预算内未走通,留待后续。
+
+## 软件自身导出 PDF(打印自动化)——2026-10-29 全流程验证通过
+工具:`orcad-mcp/print_export.py`(波形/bias/原理图三份 PDF)、`cap_print.py`(Capture 重启+切页+打印)。
+
+- **菜单操作不要点屏幕坐标**:用 ctypes `GetMenu/GetSubMenu/GetMenuItemID` 枚举菜单树,`PostMessage(hwnd, WM_COMMAND, id, 0)` 异步触发(不会被模态对话框阻塞,SendMessage 会)。菜单文本匹配 `norm(s)=s.split('\t')[0]` 去掉 `&` 和尾点;注意 PSpice 菜单是 **"Add Trace..."(单数)**。
+- **读控件文本**:MFC 对话框是 Unicode,`WM_GETTEXT` 缓冲按 `L*2` 字节 utf-16-le 解码再 `split('\x00')[0]`;按 `L` 字节切会把 ASCII 读成 `'A\x00n\x00…'` 乱码。
+- **Probe 加轨迹**(旧法点列表项不可靠):Trace→Add Trace 对话框 → 对**最宽的可见 Edit**(Trace Expression, id=301)`WM_SETTEXT` 写表达式 → `WM_GETTEXT` 回读验证 → 对 id=1 按钮 `SendMessage(BM_CLICK)` → 轮询对话框关闭。三轨迹循环即可。
+- **打印三步流**:PostMessage File>Print → 找 #32770 标题=="打印"/"Print" → 物理点击 OK(id=1 按钮,先 set_foreground)→ 等待"另存为/Save Print Output As" #32770 → 首个可见 Edit `WM_SETTEXT` 全路径 → 回车。**先删目标 PDF** 避免覆盖确认框。默认打印机 `win32print.SetDefaultPrinter("Microsoft Print to PDF")`。
+- **bias 文本导出**:PSpice A/D File>Open 的"打开"对话框首个 Edit 填 `.out` 全路径回车;打印前断言框架标题含 `bias.out`(File>Print 打印的是**活动子窗口**)。注意 View→Output File 打开的是当前 dat 对应的 out,不是 bias 的。
+- **Capture 原理图打印**:必须先激活 MDI 子窗口 `/ - (SCHEMATIC1 : PAGE1)`。workbook 标签模式下 Window 菜单无文档列表、`WM_MDIACTIVATE`/`WM_MDIRESTORE` 都无效;**物理点击顶部标签条**(PAGE1 标签实测屏坐标 ≈(96,129),屏 1707x1067;ImageGrab 截图像素==屏幕像素,阅读工具显示的是放大图,读坐标要按比例折算)。
+- **Capture 主线程会硬阻塞**(连 WM_GETTEXT 都挂,常因启动恢复对话框):任何 SendMessage 前用 ctypes `SendMessageTimeoutW(SMTO_ABORTIFHUNG, 3000)`;挂死后 `taskkill //F //T //IM Capture.exe` → 删 `EXP3.DSNlck` → 重启 opj → 自动弹"projects were not properly closed"恢复对话框,点"确定"(id=1)即可重载。
+- 打印 PDF 内容务必用 pymupdf 渲染成图人工核验(曾打印过错误的活动窗口,PDF 大小都接近 148KB,不可凭大小判断)。
+
+## 手册级波形复刻 + 空载实验 (2026-10-29 第二轮)
+- **Probe 打印对话框有 "Plots to Print" 列表**(多选 ListBox, 控件 ID 1130):默认只选第一项,
+  File→Print 永远打最早开的窗口!必须 `LB_SETSEL(0x0185, 1, index)` 选中目标
+  (LB_SETCURSEL 在多选列表只给焦点不设选中态),再发
+  `WM_COMMAND, MAKEWPARAM(1130, LBN_SELCHANGE=1), hlb` 通知;否则 OK 报
+  "At least one plot window must be selected"。
+- **Probe 标注 (Plot→Label→Text, 命令 ID 0x802e)**:OK 后若状态栏出现
+  "Move the text in the desired location" = 标签跟随鼠标,**必须物理点击放置;
+  这种方式放置的标签才会进入打印输出**(直接自放置的可能不进打印)。标签锚定在
+  数据坐标,Axis Settings 改量程后会"消失"(锚点移出可视区),与屏幕所见无关。
+- **Agent 端口**:agent 默认连 5177(仅当启动 Capture 的进程环境有 ORCAD_MCP_PORT 才改);
+  ZCode 注册的 orcad-capture MCP server 常驻 5177 且 agent 自动连上——**直接用
+  mcp__orcad-capture__tcl_eval 等工具,不要自己再起 bridge**(10048 端口占用即它)。
+- **TCL eval 前置条件**:GetActivePage 等需要 SchematicView——先物理点击 PAGE1
+  workbook 标签(实测屏 (96,129), 屏 1707x1067)。
+- **DBO 建网络别名**:`$wire NewAlias $st (MakeCString name) (MakeCPoint x y) (MakeLOGFONT) 0 $::DboValue_DEFAULT_OBJECT_COLOR`;
+  枚举别名 = 页 NewWiresIter → 每根线 NewAliasesIter;flat net 名单 =
+  $::DboSession_s_pDboSession → NewDesignsIter → NewFlatNetsIter → GetName
+  (自动名 N0xxxx = 无别名;CommentText 用 NewCommentGraphicsIter→GetDboCommentText→GetText/SetText)。
+- **Capture "Start Page" 内嵌浏览器会周期性把窗口拉回前台/z 序顶端**——自动化前先
+  点 Start Page 标签 + Ctrl+F4 关掉。两个都被 set_fore 设过 TOPMOST 的窗口
+  (Capture/Probe)会互相压盖:把不参与交互的 SetWindowPos(HWND_NOTOPMOST=-2)。
+- **Capture 视图渲染滞后于 DB**:DBO 改属性后 F5 才刷新,勿以屏幕判断 DB 状态。
+- **psp_cmd 追加仿真**:手写 tran2.cir(.PRINT V[Vo1], RL=100meg)→ psp_cmd -r tran2.cir
+  → Probe File→Open tran2.dat → Add Trace V(Vo1)。
+- **表3.1 口径**:指导书 cursor 最大值 = 含首周期上冲的全局峰值(2.5mA 档:
+  Vim=5.01mV/Vom=394.6mV/Vom'=766.4mV → Av=78.7/Av'=152.9/Ri=0.77k/Ro=1.88k);
+  稳态末整周期口径 Vim=4.48/Vom=374.7(Av=83.7) 作为备用列出。
+- MFC 属性页(Axis Settings)跨进程切 tab:物理点第一页给焦点 → 直发 WM_LBUTTONDOWN/UP
+  到 tab 控件 → VK_RIGHT,TCM_GETCURFOCUS(0x132F) 验证;OK 只提交激活过的页——
+  复现不稳定,失败就手工兜底。
+
+## 安静模式:自动化不抢前台 (2026-10-29, orcad_quiet.py)
+用户要在自动化运行时同时用电脑 → 禁止一切前台操作。orcad-mcp/orcad_quiet.py 实现:
+- **全消息驱动**:菜单 PostMessage、对话框按钮 BM_CLICK(SendMessage)、文本 WM_SETTEXT、
+  列表 LB_SETSEL、保存=向 Save As 对话框发 WM_COMMAND IDOK(不按回车)。
+- **禁用**:SetForegroundWindow、TOPMOST、keybd_event、mouse_event/物理点击。
+- 打印前 WM_CLOSE 关其他 MDI 子窗口(弹保存提示自动点"否");打印后用 pymupdf 读
+  PDF 文本核验 Profile/标注,失手自动重试一次。
+- **标注不用 Probe 内置 move-mode**(其放置点读真实光标 GetCursorPos,消息点击无效)——
+  安静模式用 pymupdf 在打印出的 PDF 上叠写标注(insert_text + china-s 字体,
+  图题 30%W/签名 62%W @14%H),波形本体仍是软件原打印。
+- 实测:全流程(开关窗/加轨迹/打印/标注)零前台干扰,PDF 内容核验通过。
+- **要物理点击的流程(PlaceWire 画线、Probe 内标注)放到 RDP 回环会话或错峰执行**:
+  RDP 断开后 SendInput 仍在会话内有效(需 Win 专业版或 rdpwrap);
+  或用 ZCode 闲时任务把整批 OrCAD 操作排到用户离开时跑。
+
+## v5 实战补充(2026-10-29 第6轮,全消息驱动冷启动→切页→打印)
+
+工具:`cap_open.py`(冷启动+恢复框)、`cap_activate.py`(切页)、`quiet_print.py`
+(任意窗口打印)、`orcad_quiet.py --dat ...`(Probe 全流程 CLI)。
+
+### 冷启动与端口
+
+- `subprocess.Popen([Capture.exe, opj])` **必须传 `env`**,且 `ORCAD_MCP_PORT`
+  要在 `import bridge` 之前设置。否则 agent 连默认 5177,本地 bridge 监听 5178,
+  `bridge.BRIDGE.session()` 永远超时(实测 180s 超时)。
+- 启动后可能出现两类模态框:
+  - 标题 `OrCAD Capture CIS`,按钮只有 **确定/取消** = 上次异常关闭提示。
+    点**确定**(id=1)才会加载工程;不点则停在 Start Page。
+  - 标题带 ORCAP-1680、按钮 **是/否** = 是否恢复未保存修改。按需选否。
+- 恢复框处理后 MDI 活动子窗口应是 `/ - (SCHEMATIC1 : PAGE1)`;若仍是 Start Page,
+  说明工程没加载(检查是否点了取消)。
+
+### 页面激活(替代物理点标签)
+
+- `SelectPMItem {PAGE1}` 只把项目树节点选中,`GetActivePage` 仍报
+  `Command Requires SchematicView`。
+- 正确做法:向 `SysTreeView32` 子窗口依次 `PostMessage`:
+  `WM_SETFOCUS` → `WM_KEYDOWN VK_RETURN` → `WM_KEYUP VK_RETURN`。
+  实测一次成功,`GetActivePage` 返回 `_xxx_p_DboPage`,标题变为
+  `... [/ - (SCHEMATIC1 : PAGE1)]`,**零前台/零鼠标**。
+- 该法比 v4 记录的"物理点击 workbook 标签 (96,129)"更稳,优先使用。
+
+### NewPlacedInst 正确签名(复制现有元件)
+
+```tcl
+set dev [$srcInst GetDevice $st]          ;# 必须是 DboDevice*,传字符串报 No matching function
+set sess [$pg GetSession $st]
+set lib  [$sess GetLib [CStr "C:/OrCAD/.../analog.olb"] $st]
+set part [$lib GetPart [CStr "R.Normal"] $st]
+set inst [$pg NewPlacedInst $st [CStr "RL"] [CStr "R"] $part $dev $loc $rot]
+```
+
+- **PackageName 传基名 `R`**;传 `R.Normal` 会变成 `R.Normal.Normal`,
+  `GetSourcePartName` 返回 `R.Normal.Normal`,渲染异常(竖排文本的诱因之一)。
+- 6 参调用 = 库默认方向;7 参带 `$rot` 会**连位号/值文本一起转**。
+- 新件位号先成 `R?`,再 `SetEffectivePropStringValue("Reference","RL")` 改名。
+- `device` 用 `$existingInst GetDevice $st` 借同类型元件的 DboDevice*;
+  `GetPart` 的件名要带 `.Normal`。
+
+### 保存
+
+- `Menu "File::Save"` 会崩(结构修改已全走原生事务也崩)。
+- 可靠路径:DB 改完 → `$pg MarkModified` → 让 Capture 前台 → **Ctrl+S**。
+  标题无 `*` 不代表已保存,以 `.DSN` mtime 为准。
+- 崩溃后 `.opj` 可能被降级(丢 Design Resources/schematic Doc),工程树空白;
+  `git checkout -- exp3.opj` 恢复。
+
+### 文本竖排(已知未解决)
+
+- 复制 Rb1 新建 RL 后,RL 的位号/值文本竖排。DB 检查:`GetRotation`、
+  `NewDisplayPropsIter` 的 rotation/location 与 Rb1 完全一致。
+- 已试无效:重放新件、prop `SetRotation` 0/1/2/3、
+  `ResetAllDisplayPropertiesFontToDefault`、改 PackageName、换 6/7 参。
+- `SetFont(LOGFONT)` 直接崩 Capture。**暂时接受**,不要为它反复重做设计。
+
+### 编码 / 提权 / DPI / IME
+
+- PowerShell `Set-Content -Encoding UTF8` 写 **BOM**;Tcl 报
+  `invalid command name "\ufeffset"`。读 `.tcl` 用 `utf-8-sig`,或写 ASCII。
+- 前台是管理员窗口时,中完整性进程的 `SetCursorPos`/`SetForegroundWindow`
+  返回 0;需要物理输入时用 `Start-Process pythonw -Verb RunAs` 跑 `elev_run.py`。
+- 非 DPI 感知进程的坐标 = 物理像素 / 1.5;物理点击前先确认 DPI 缩放。
+- 中文输入法会吞字母快捷键;发按键前先 Shift 切英文。
+
+### 安静打印一条命令
+
+```bat
+python quiet_print.py "OrCAD Capture" out_sch.pdf
+python quiet_print.py "PSpice A/D"    out_bias.pdf
+python orcad_quiet.py --dat tran.dat --out out_tran.pdf ^
+  --traces V(Vs) V(Vi) V(Vo) --caption "..." --name "信255 王保哲" --two-frame
+```
+
+- 三者都是 File>Print(PostMessage WM_COMMAND)→ 打印框默认按钮 `BM_CLICK`
+  → Save As 首个可见 Edit `WM_SETTEXT` → 对话框 `WM_COMMAND IDOK`。
+- 打印前目标文档必须已打开并处于活动子窗口;Capture 还要先 `cap_activate.py`。
+- 打完必须 pymupdf 读文本/渲染核验(大小相近不能证明内容对)。
