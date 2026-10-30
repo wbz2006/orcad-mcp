@@ -30,7 +30,7 @@ set _null NULL
 DUMP = HEADER + r'''
 set pg [GetActivePage]
 set out {}
-# 元件+引脚
+# 元件+引脚+包围盒
 set it [$pg NewPartInstsIter $_st]
 set i [$it NextPartInst $_st]
 while { $i != $_null } {
@@ -47,8 +47,15 @@ while { $i != $_null } {
             lappend pins "[DboTclHelper_sGetCPointX $sp],[DboTclHelper_sGetCPointY $sp]"
             set pin [$pit NextPin $_st]
         }
-        delete_DboPartInstPinsIter $pit
-        lappend out "PART|$lx,$ly|[join $pins ,]"
+        catch { delete_DboPartInstPinsIter $pit }
+        set bb "0,0,0,0"
+        if { ![catch {
+            set box [$pl GetBoundingBox]
+            set tl [DboTclHelper_sGetCRectTopLeft $box]
+            set br [DboTclHelper_sGetCRectBottomRight $box]
+            set bb "[DboTclHelper_sGetCPointX $tl],[DboTclHelper_sGetCPointY $tl],[DboTclHelper_sGetCPointX $br],[DboTclHelper_sGetCPointY $br]"
+        }] } { }
+        lappend out "PART|$lx,$ly|[join $pins ,]|$bb"
     }
     set i [$it NextPartInst $_st]
 }
@@ -95,7 +102,8 @@ def parse(raw):
             loc = tuple(map(int, f[1].split(",")))
             nums = [int(x) for x in f[2].split(",") if x]  # 引脚被", "拍平: 两两成对还原
             pins = [(nums[i], nums[i + 1]) for i in range(0, len(nums) - 1, 2)]
-            parts.append((loc, pins))
+            bb = tuple(map(int, f[3].split(","))) if len(f) > 3 and f[3] else (0, 0, 0, 0)
+            parts.append((loc, pins, bb))
         elif f[0] == "WIRE":
             wires.append((tuple(map(int, f[1].split(","))), tuple(map(int, f[2].split(",")))))
         elif f[0] == "JCT":
@@ -135,8 +143,8 @@ def audit_page(name, raw):
     ep_map = {}
     for e in ends:
         ep_map.setdefault(e, e)
-    for _, pins in parts:
-        for p in pins:
+    for entry in parts:
+        for p in entry[1]:
             parent.setdefault(p, p)
             if p in ep_map:  # 引脚落在导线端点上 → 并入该导线组
                 union(p, ep_map[p])
@@ -164,24 +172,54 @@ def audit_page(name, raw):
                     warn_cross.append((x, y))
 
     floating = []
-    for loc, pins in parts:
+    for entry in parts:
+        loc, pins = entry[0], entry[1]
         for p in pins:
             # 悬空 = 不在任何导线端点上,也没通过结点/T并入任何组(组内只有自己)
             if p not in ep_map and find(p) == p:
                 floating.append((loc, p))
 
+    # 导线穿符号检查(两种缺陷模式: 端点扎进符号体内且不是引脚;导线整体横穿符号。
+    # 判据用"引脚包络核"(pins bbox ± 5),不用 GetBoundingBox——后者含显示属性文本,
+    # 会把贴着标签的导线误报。引脚引入段是正常画法,不报)
+    through = []
+    for loc, pins, bb in parts:
+        if not pins:
+            continue
+        pxs = [p[0] for p in pins]
+        pys = [p[1] for p in pins]
+        m = 5
+        x1, y1, x2, y2 = min(pxs) - m, min(pys) - m, max(pxs) + m, max(pys) + m
+        pinset = set(pins)
+        for a, b in wires:
+            (ax, ay), (bx, by) = a, b
+            lox, hix = min(ax, bx), max(ax, bx)
+            loy, hiy = min(ay, by), max(ay, by)
+            hit = False
+            for e in (a, b):
+                if e not in pinset and x1 <= e[0] <= x2 and y1 <= e[1] <= y2:
+                    hit = True  # 端点扎进符号体内且不是引脚
+            if not hit and ax == bx and loy < y1 and hiy > y2 and x1 <= ax <= x2:
+                hit = True  # 竖线整体横穿
+            if not hit and ay == by and lox < x1 and hix > x2 and y1 <= ay <= y2:
+                hit = True  # 横线整体横穿
+            if hit:
+                through.append((loc, (a, b)))
+
     groups = {}
     for e in set(ends):
         groups.setdefault(find(e), []).append(e)
     print(f"=== {name}: 元件{len(parts)} 导线{len(wires)} 结点{len(jcts)} "
-          f"连通组{len(groups)} 悬空引脚{len(floating)}")
+          f"连通组{len(groups)} 悬空引脚{len(floating)} 穿符号{len(through)}")
     for loc, p in floating:
         print(f"  悬空: 元件@{loc} 引脚@{p}")
+    for loc, seg in through:
+        print(f"  穿符号: 元件@{loc} 的线段{seg} 扎入或横穿符号体")
     for e, seg in warn_t:
         print(f"  T-TOUCH无结点: 端点{e} 落在{seg}中间(电气未连通!)")
     for c in warn_cross:
         print(f"  交叉(无结点,不连通,仅提示): {c}")
-    return not floating and not warn_t
+    return not floating and not warn_t and not through
 
 
 if __name__ == "__main__":
