@@ -157,3 +157,25 @@ https://github.com/wbz2006/orcad-mcp (新机器先 clone + `pip install -r requi
   `ResetAllDisplayPropertiesFontToDefault` 均无效;`SetFont(LOGFONT)` 直接崩 Capture。
   暂时接受(打印 PDF 可见,已交付图件带此缺陷),不要在交付前为此反复重做设计。
 - Capture 的 `Menu "File::Save"` 崩溃原因未定位;用 MarkModified + Ctrl+S 规避。
+
+## 从零画整页原理图 (2026-10-30 实验5 差分放大, ex5-example)
+
+- NewPlacedInst 直接从库件建实例(无需已有同类型元件):
+  $pg NewPlacedInst $st [CStr ref] [CStr $part] $symbol $dev [CPoint 0 0] $rotation,
+  其中 $symbol = $lib GetPart [CStr "$part.Normal"],$dev = [[$symbol GetPackagePtr] GetDevice 0 $st]。
+  与复制现有实例的 $dstPage NewPlacedInst $srcInst $st [CPoint] 是两个不同签名。
+- 锚点定位:先 dump 引脚(NewPinsIter→GetPinName+GetOffsetHotSpot),按锚点引脚
+  或引脚均值算偏移,SetLocation (x-ax) (y-ay) 把锚点精确放到目标坐标。
+- 镜像:$inst SetMirror $mirror(差分对左右对称件用)。
+- 引脚名大小写按符号实测:Q2N2222 是小写 b/c/e,按 B 找锚点直接报 not found。
+- SetPageWidth/SetPageHeight 单位是 doc(0.01inch):Letter = 11000/8500。
+  旧记录 SetPageWidth 1100/850 得到的 doc=110×85(0.1页)——是错的,以 08 脚本实测为准
+  (BEFORE 1100,850→doc 110,85;AFTER 11000,8500→doc 1100,850,重开保持)。
+- 地符号(Globals)锚点是热点不是 loc:PlaceGround 后 GetOffsetHotSpot 比 loc 偏
+  (+10,0),SetLocation (x-10) y 才让热点落在导线端点上;挂接成功判据 =
+  $g GetWire $st 返回非 NULL(=NULL 即悬空,别只看坐标)。
+- 核对顺序:CloseProject → Open opj → OPage → 重读 GetPartInstCount/GetWireCount/
+  GetPageWidth(重开后计数与页面尺寸不变才算落盘);打印 PDF→pymupdf 渲染对照手册图。
+- 本例工程 D:/Users/Document/OrCAD/auto/ex5-example/:编号 tcl 脚本(01~23 逐步演进)+
+  verification/session.jsonl(每步脚本/结果/错误留档)+ 最终 PDF/PNG 对照 reference-fig5-4.png。
+  新电路从零画页可整流程照抄。
