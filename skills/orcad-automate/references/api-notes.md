@@ -395,3 +395,29 @@ python orcad_quiet.py --dat tran.dat --out out_tran.pdf ^
   注意 pymupdf 的 text blocks 会把图注与标题栏文本合并成横跨整页的 block,
   必须用 words 级处理。
 - GetBoundingBox 含显示属性文本,同样不适合做定位。
+
+## 实战实例:按手册图复刻全页重排 (2026-10-29 第四轮, examples/exp4_mos/relayout_fig415.py)
+
+完整案例脚本:`examples/exp4_mos/relayout_fig415.py` —— 量手册 → 坐标表 → 删/移/布线
+→ 结点 → save_verified,四步全部参数化。换电路/换手册图时只改 DEL/WIRE/MOVES 三张表。
+
+**工作流(重排任何"与手册不一致"的页面都按这个顺序):**
+1. **量手册**:以已知尺寸的元件为标尺(M2 本体高 40),量出所有间距×换算系数
+   (标尺实际单位/标尺像素)。改布局先量手册再算坐标,不要凭感觉挪。
+2. **列坐标表**:锚定一个元件不动,其余由间距推出;注意各符号引脚偏移不同
+   (VDC/V3 已实测记录在上),引脚位置 = loc + 偏移。
+3. **删旧线**:端点匹配(FIND_DEL 模板)→ SelectObjectById → Menu "Edit::Delete"。
+   全删后旧结点属性随导线一起消失,无需单独删结点。
+4. **移件/GND**:SetLocation 不带 status。
+5. **布新线**:PlaceWire(英寸,y 向下);跨越其它线端点会被自动分段——最终以
+   重新 dump 的端点清单为准,不要以"我放了什么"为准。
+6. **结点**:只有"端点落在另一根线中间"的 T 点才 PlaceJunction;≥3 线端点相接
+   自动画圆点。
+7. **闸门**:save_verified(mtime)→ sch_connectivity_audit(悬空/横穿/T触)→
+   打印 PDF → crop_report_figure.py 报告特写图。
+
+本案例的两个特殊点:
+- **基极-源极并接**:手册要求基极与源极同一条线入地 → 符号旁 10 单位短接线 +
+  T 点结点 (620,430),源极单线下地;不做独立衬底回线。
+- **图注挪不动**:CommentGraphic 的 SetLocation 无视觉效果(位置在显示属性里,
+  锚点恒 (0,0));报告特写图不含图注,由 Word 排版另写。

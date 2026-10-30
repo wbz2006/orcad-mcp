@@ -43,6 +43,10 @@ https://github.com/wbz2006/orcad-mcp (新机器先 clone + `pip install -r requi
   (V1 负极红竖线曾被误读为电池符号图形)。
 - `print_export.py` / `cap_print.py` — 打印底层函数、Capture 重启恢复(旧路径)。
 - `examples/exp3_bjt_ce/` — 画图/连线/属性的历史脚本(`tclrun.py` 可跑无 BOM 的 .tcl)。
+- **`examples/exp4_mos/relayout_fig415.py` — 实战示例:按手册图实测比例全页重排**。
+  "量手册→坐标表→删/移/布线→结点→校验"全流程参数化;换电路/换手册图只改
+  DEL/WIRE/MOVES 三张表(含基极-源极并接、坐标骨架与量法)。工作流详解见 api-notes
+  "实战实例"节。配套:crop_report_figure.py(打印 PDF→报告特写图)。
 
 ## 1. 连接与页面
 
