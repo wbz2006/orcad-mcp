@@ -30,21 +30,14 @@ for w in words:
     r = pymupdf.Rect(w[:4])
     if r.intersects(pymupdf.Rect(S.x0-30, S.y0-30, S.x1+30, S.y1+30)):
         box |= r                     # 属性文本(VOFF/VAMPL 等)
-band, cap_right = None, 0.0
-for w in words:
-    if '图4.' in w[4]:
-        band = w[1]
-if band is not None:
-    for w in words:
-        r = pymupdf.Rect(w[:4])
-        if abs(r.y0 - band) < 3 and r.x0 < cap_right_limit:
-            box |= r; cap_right = max(cap_right, r.x1)
+# 图注不进图(由报告排版文字承担);白覆盖右下时以电路右缘为界
+cap_right = 0.0
 m = 14
 clip = pymupdf.Rect(max(0, box.x0-m), max(0, box.y0-m), min(W, box.x1+m), min(H, box.y1+m))
 pix = p.get_pixmap(dpi=300, clip=clip)
 pix.save(out)
 im = Image.open(out); sc = 300/72
-wx0 = max(0, min(int(((cap_right or S.x1) + 10 - clip.x0)*sc), im.width))
+wx0 = max(0, min(int((S.x1 + 10 - clip.x0)*sc), im.width))
 wy0 = max(0, min(int((S.y1 + 5 - clip.y0)*sc), im.height))
 if wx0 < im.width and wy0 < im.height:
     im.paste((255, 255, 255), (wx0, wy0, im.width, im.height))

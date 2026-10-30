@@ -193,13 +193,14 @@ def audit_page(name, raw):
         pinset = set(pins)
         for a, b in wires:
             (ax, ay), (bx, by) = a, b
+            if abs(ax - bx) + abs(ay - by) <= 15:
+                continue  # 贴符短接线(如基极-源极并接)不算扎入
             lox, hix = min(ax, bx), max(ax, bx)
             loy, hiy = min(ay, by), max(ay, by)
+            # 只查"整体横穿";端点扎入由悬空引脚检查兜底(真扎入必然让目标引脚悬空),
+            # 否则基极-源极并接线、结点分割点都会误报
             hit = False
-            for e in (a, b):
-                if e not in pinset and x1 <= e[0] <= x2 and y1 <= e[1] <= y2:
-                    hit = True  # 端点扎进符号体内且不是引脚
-            if not hit and ax == bx and loy < y1 and hiy > y2 and x1 <= ax <= x2:
+            if ax == bx and loy < y1 and hiy > y2 and x1 <= ax <= x2:
                 hit = True  # 竖线整体横穿
             if not hit and ay == by and lox < x1 and hix > x2 and y1 <= ay <= y2:
                 hit = True  # 横线整体横穿
