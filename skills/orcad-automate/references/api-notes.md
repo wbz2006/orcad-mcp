@@ -84,8 +84,8 @@ $pl GetReference $c;  DboTclHelper_sGetConstCharPtr $c   ;# CString 都这样读
 - **模态对话框阻塞 TCL 事件循环**(after/fileevent 全停)→ agent 假死。
   外部收割线程(win32 EnumWindows + BM_CLICK)是必需品;规则按语义:
   "recovered"→否 / "Save changes"→是 / 其他→确定;子串匹配按钮文本。
-- 视图(ZoomScale/ZoomSelection/Menu View::Zoom)可能永久失效 —— 与 DB 无关,
-  验证与导出全部走 DB + 外部渲染,不要依赖屏幕。
+- Tcl 视图缩放命令曾导致本机页面渲染冻结 —— 与 DB 无关;验证几何时读 DB。
+  这是 Tcl 自动化的实测风险,不据此断言图形界面缩放控件失效。
 - Capture 的 COM `Quit()` 在部分场景抛错;taskkill /IM Capture.exe 兜底(注意先保存)。
 - Capture.exe 的 RUNASADMIN 兼容标记会阻断 COM 启动(ERROR_ELEVATION_REQUIRED):
   删除 `HKCU\...\AppCompatFlags\Layers` 对应值。
@@ -97,9 +97,11 @@ $pl GetReference $c;  DboTclHelper_sGetConstCharPtr $c   ;# CString 都这样读
 - **新元件检测必须用 ID 差集**(放置前后集合差),不要用坐标启发。
 - **重复/多余实例可删**:`SelectObjectById id` + `Menu "Edit::Delete"`。
 - **SNUBBER/accircuits 等教程设计的页面是巨页**(164×104"),复制底图后要
-  `$pg SetPageWidth 11000 / SetPageHeight 8500` 改成 Letter(单位是 doc 0.01inch;1100/850 是错的,见"从零画整页原理图"节)。ABC.DSN 页面本身正常(1100×850)。
-- **视图毒化**:ZoomScale/ZoomArea/ZoomAll/ZoomSelection 一旦调用,页面渲染可能永久冻结
-  (保存进 DSN,重开依旧),且滚轮/键盘/TCL 缩放全部失效——**自动化中禁用一切缩放命令**。
+  `$pg SetPageWidth 11000 / SetPageHeight 8500` 改成 Letter;这是本机实测参数,设置后还要核对 `GetDocUnits`。旧记录称 ABC.DSN 页面为 1100×850,但未记明读数接口,不可用作设置值或接口换算依据。
+- **Tcl 视图缩放风险**:本机实测经 Tcl 调用 `ZoomScale`/`ZoomArea`/`ZoomAll`/
+  `ZoomSelection` 或 `Menu View::Zoom` 后,页面渲染曾冻结,关闭重开仍在。
+  不要用这些 Tcl 命令修复空白/局部页面;先核对页面数据库几何。这里的证据针对 Tcl 自动化,
+  不足以推断 Capture 图形界面的缩放工具同样失效。
 - 跨设计 `NewPlacedInst(src, st, offset)` 实际可用(before/after 计数验证);
   offset 是相对源位置的偏移,复制后需 SetLocation。
 - **元素删除**:`SelectObjectById` + `Menu "Edit::Delete"`(wire 也能删?未验证,元件已验证)。
@@ -108,15 +110,15 @@ $pl GetReference $c;  DboTclHelper_sGetConstCharPtr $c   ;# CString 都这样读
 - Probe(tclscripts/pspAuto)支持脚本化,Add Traces 对话框可 win32 点击自动化,
   但表达式框 WM_SETTEXT 会被 MFC 重置,需真实键盘;时间预算内未走通,留待后续。
 
-## 软件自身导出 PDF(打印自动化)——2026-10-29 全流程验证通过
+## 软件自身导出 PDF(打印自动化)——2026-10-29 在 exp3 环境验证通过
 工具:`orcad-mcp/print_export.py`(波形/bias/原理图三份 PDF)、`cap_print.py`(Capture 重启+切页+打印)。
 
 - **菜单操作不要点屏幕坐标**:用 ctypes `GetMenu/GetSubMenu/GetMenuItemID` 枚举菜单树,`PostMessage(hwnd, WM_COMMAND, id, 0)` 异步触发(不会被模态对话框阻塞,SendMessage 会)。菜单文本匹配 `norm(s)=s.split('\t')[0]` 去掉 `&` 和尾点;注意 PSpice 菜单是 **"Add Trace..."(单数)**。
 - **读控件文本**:MFC 对话框是 Unicode,`WM_GETTEXT` 缓冲按 `L*2` 字节 utf-16-le 解码再 `split('\x00')[0]`;按 `L` 字节切会把 ASCII 读成 `'A\x00n\x00…'` 乱码。
 - **Probe 加轨迹**(旧法点列表项不可靠):Trace→Add Trace 对话框 → 对**最宽的可见 Edit**(Trace Expression, id=301)`WM_SETTEXT` 写表达式 → `WM_GETTEXT` 回读验证 → 对 id=1 按钮 `SendMessage(BM_CLICK)` → 轮询对话框关闭。三轨迹循环即可。
-- **打印三步流**:PostMessage File>Print → 找 #32770 标题=="打印"/"Print" → 物理点击 OK(id=1 按钮,先 set_foreground)→ 等待"另存为/Save Print Output As" #32770 → 首个可见 Edit `WM_SETTEXT` 全路径 → 回车。**先删目标 PDF** 避免覆盖确认框。默认打印机 `win32print.SetDefaultPrinter("Microsoft Print to PDF")`。
+- **打印三步流**:PostMessage File>Print → 找 #32770 标题=="打印"/"Print" → 确认 OK(id=1) → 等待"另存为/Save Print Output As" #32770 → 仅当路径控件已验证可读写时自动填写并回读 → 检查 PDF。仓库现有打印脚本会删除同名目标文件,并把默认打印机改为 `Microsoft Print to PDF`(不恢复原设置);先选一个不存在的输出路径,不要为避免覆盖确认而自动删除旧文件。Save As 输入控件因系统对话框实现而异,本地每个环境都要核实;未知或不支持消息的对话框改用手动触发打印并在原生对话框输入路径。
 - **bias 文本导出**:PSpice A/D File>Open 的"打开"对话框首个 Edit 填 `.out` 全路径回车;打印前断言框架标题含 `bias.out`(File>Print 打印的是**活动子窗口**)。注意 View→Output File 打开的是当前 dat 对应的 out,不是 bias 的。
-- **Capture 原理图打印**:必须先激活 MDI 子窗口 `/ - (SCHEMATIC1 : PAGE1)`。workbook 标签模式下 Window 菜单无文档列表、`WM_MDIACTIVATE`/`WM_MDIRESTORE` 都无效;**物理点击顶部标签条**(PAGE1 标签实测屏坐标 ≈(96,129),屏 1707x1067;ImageGrab 截图像素==屏幕像素,阅读工具显示的是放大图,读坐标要按比例折算)。
+- **Capture 原理图打印**:必须先确认目标 `.opj/.dsn` 与活动 MDI 子窗口 `/ - (SCHEMATIC1 : PAGE1)` 匹配。workbook 标签模式下 Window 菜单无文档列表、`WM_MDIACTIVATE`/`WM_MDIRESTORE` 都无效;**物理点击顶部标签条**(PAGE1 标签实测屏坐标 ≈(96,129),屏 1707x1067;ImageGrab 截图像素==屏幕像素,阅读工具显示的是放大图,读坐标要按比例折算)。
 - **Capture 主线程会硬阻塞**(连 WM_GETTEXT 都挂,常因启动恢复对话框):任何 SendMessage 前用 ctypes `SendMessageTimeoutW(SMTO_ABORTIFHUNG, 3000)`;挂死后 `taskkill //F //T //IM Capture.exe` → 删 `EXP3.DSNlck` → 重启 opj → 自动弹"projects were not properly closed"恢复对话框,点"确定"(id=1)即可重载。
 - 打印 PDF 内容务必用 pymupdf 渲染成图人工核验(曾打印过错误的活动窗口,PDF 大小都接近 148KB,不可凭大小判断)。
 
@@ -163,8 +165,9 @@ $pl GetReference $c;  DboTclHelper_sGetConstCharPtr $c   ;# CString 都这样读
   报告裁剪图改为**不含图注**(Word 排版另写图注,更规范)。
 ## 安静模式:自动化不抢前台 (2026-10-29, orcad_quiet.py)
 用户要在自动化运行时同时用电脑 → 禁止一切前台操作。orcad-mcp/orcad_quiet.py 实现:
-- **全消息驱动**:菜单 PostMessage、对话框按钮 BM_CLICK(SendMessage)、文本 WM_SETTEXT、
-  列表 LB_SETSEL、保存=向 Save As 对话框发 WM_COMMAND IDOK(不按回车)。
+- **消息驱动**:菜单 PostMessage、对话框按钮 BM_CLICK(SendMessage)、文本 WM_SETTEXT、
+  列表 LB_SETSEL。当前打印路径会对 Save As 首个 Edit 发送 `WM_SETTEXT` 后提交,不回读路径;
+  只在已验证过的文件对话框中使用,未知或不接受消息的对话框应跳过该自动打印流程并手动保存。
 - **禁用**:SetForegroundWindow、TOPMOST、keybd_event、mouse_event/物理点击。
 - 打印前 WM_CLOSE 关其他 MDI 子窗口(弹保存提示自动点"否");打印后用 pymupdf 读
   PDF 文本核验 Profile/标注,失手自动重试一次。
@@ -255,7 +258,9 @@ python orcad_quiet.py --dat tran.dat --out out_tran.pdf ^
 ```
 
 - 三者都是 File>Print(PostMessage WM_COMMAND)→ 打印框默认按钮 `BM_CLICK`
-  → Save As 首个可见 Edit `WM_SETTEXT` → 对话框 `WM_COMMAND IDOK`。
+  → Save As。`quiet_print.py`、`print_export.py` 和 `orcad_quiet.py` 当前都对首个可见 Edit 发送
+  `WM_SETTEXT` 后确认,没有先回读路径;exp3 中该对话框曾接受消息,但不能据此推断其它 Windows
+  文件对话框也接受。未知或已知不接受消息的对话框不要调用这些自动打印脚本,改为手动触发打印并输入路径。
 - 打印前目标文档必须已打开并处于活动子窗口;Capture 还要先 `cap_activate.py`。
 - 打完必须 pymupdf 读文本/渲染核验(大小相近不能证明内容对)。
 
@@ -432,9 +437,8 @@ python orcad_quiet.py --dat tran.dat --out out_tran.pdf ^
   或引脚均值算偏移,SetLocation (x-ax) (y-ay) 把锚点精确放到目标坐标。
 - 镜像:$inst SetMirror $mirror(差分对左右对称件用)。
 - 引脚名大小写按符号实测:Q2N2222 是小写 b/c/e,按 B 找锚点直接报 not found。
-- SetPageWidth/SetPageHeight 单位是 doc(0.01inch):Letter = 11000/8500。
-  旧记录 SetPageWidth 1100/850 得到的 doc=110×85(0.1页)——是错的,以 08 脚本实测为准
-  (BEFORE 1100,850→doc 110,85;AFTER 11000,8500→doc 1100,850,重开保持)。
+- 页面物理尺寸必须通过 `GetDocUnits` 核对;`GetPageWidth/Height` 与它不是同一数值尺度。
+  本机测得的参数和换算见下方“页面、视口与打印故障分诊”;不要把这项本地实测当作官方单位定义。
 - 地符号(Globals)锚点是热点不是 loc:PlaceGround 后 GetOffsetHotSpot 比 loc 偏
   (+10,0),SetLocation (x-10) y 才让热点落在导线端点上;挂接成功判据 =
   $g GetWire $st 返回非 NULL(=NULL 即悬空,别只看坐标)。
@@ -443,3 +447,27 @@ python orcad_quiet.py --dat tran.dat --out out_tran.pdf ^
 - 本例工程 D:/Users/Document/OrCAD/auto/ex5-example/:编号 tcl 脚本(01~23 逐步演进)+
   verification/session.jsonl(每步脚本/结果/错误留档)+ 最终 PDF/PNG 对照 reference-fig5-4.png。
   新电路从零画页可整流程照抄。
+
+## 页面、视口与打印故障分诊 (2026-10-31, ex5-retry)
+
+先把问题分成设计数据库、页面物理尺寸、屏幕视口、打印对话框和 Windows 工作区/打印配置,
+逐层读证据;不要从局部截图直接推断电路数据丢失或注册表损坏。
+
+- **页面太小会造成“只看到标题栏/边框”**:ex5-retry 的 PAGE1 回读为
+  `GetPageWidth/Height=1100×850`,但 `GetDocUnits=110×85`;数据库仍有 19 个元件、48 根导线。
+  建页脚本传了 1100/850,导致实际纸面只有目标 Letter 的十分之一。正确 Letter 参数在本机实测为
+  11000/8500;改后检查 `GetDocUnits=1100×850`,保存、关闭并重开,再次回读页面尺寸和元件/导线数量。
+  Tcl 可用 `$pg GetDocUnits` 取得 `CSize`,再用 `DboTclHelper_sGetCSizeX/Y` 读取宽高;不要只凭页面截图或 `GetPageWidth/Height` 判断纸张实际尺寸。
+- **页面尺寸和视口是两个状态**:页面几何正确、元件/导线数量正确而屏幕仍局部显示时,
+  再处理视口。先关闭并重开目标页面,再用 Capture 图形界面的视图控件观察;不要调用上面列出的
+  Tcl 缩放命令作为自动修复。若图形工具仍无法恢复,保存数据库状态并记录窗口/视口状态,不要重画电路。
+- **打印按阶段诊断**:先验证目标工程和活动 MDI 页面,再确认 File→Print 菜单可用、打印对话框出现、
+  点确认后出现 `Save Print Output As`,最后确认输出路径、非空 PDF 和渲染内容。若 Save As 有可见 Edit,
+  `WM_SETTEXT` 后回读同一控件的完整路径才继续;Vista 风格文件对话框可能不接受消息。失败时保留对话框,
+  让用户手动输入并保存,不要重复触发打印或让 `capture_guard.reap` 关闭预期的 Save As 对话框。
+- ex5-retry 的记录中 `Microsoft Print to PDF` 是 Windows 默认打印机且 Spooler 正常,但项目仍未产出 PDF;
+  本地交付说明记录 Save As 文件名控件拦截了自动输入。这个案例不能证明其它电脑的打印机/驱动均正常,
+  也不能把失败归因于 Capture 注册表。
+- `HKCU\Software\OrCAD\CaptureWorkSpace` 是窗口布局/工作区排查线索,只有 Capture 主窗口确实最小化或落在
+  当前显示器范围外时才检查 placement;它不能解释 `.dsn` 中的页面物理尺寸。Windows printer 配置只在打印机
+  缺失、默认设备错误或 Spooler 异常时检查。注册表先只读诊断,不因视图或 Save As 故障而盲目删除/重置。

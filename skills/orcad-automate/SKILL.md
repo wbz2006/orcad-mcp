@@ -29,7 +29,10 @@ https://github.com/wbz2006/orcad-mcp (新机器先 clone + `pip install -r requi
 - **`cap_activate.py [PAGE1]`** — 消息驱动激活原理图页(SelectPMItem + 给项目树
   PostMessage 回车),解决 `GetActivePage` 报 "Command Requires SchematicView"。
 - **`quiet_print.py <窗口标题前缀> <out.pdf>`** — 对 Capture / PSpice A/D / Probe
-  任意已打开文档做消息驱动打印到 PDF(File>Print→BM_CLICK→Save As 填路径)。
+  已打开文档做消息驱动打印。当前脚本对首个可见 Edit 发送 `WM_SETTEXT` 后直接确认,没有回读路径;
+  仅在该版本对话框已验证可接受此消息时使用。遇到 Vista 风格 Save As 对话框时不要调用该脚本,
+  改为手动触发打印并在原生对话框输入路径。该脚本会删除同名输出文件并把默认打印机改为
+  `Microsoft Print to PDF`,不会恢复原默认打印机;使用前选一个新路径。
 - `probe_export.py` — 物理点击模式(需要前台,仅限用户可让出电脑时;Probe 内原生标注)。
 - `tcl/prep_ic_loaded.tcl` — 参数化 IC 档切换(Rb1/VAMPL/RL/别名改名,带回读)。
 - **`capture_guard.py` — 卡顿/意外弹窗防护(所有长流程必用)**:
@@ -68,10 +71,23 @@ https://github.com/wbz2006/orcad-mcp (新机器先 clone + `pip install -r requi
    TCL 超时(30s)基本=被模态框卡住,枚举 #32770 处理后重试。
 6. **`.opj` 可能被降级**:崩溃/异常打开后 Design Resources 与 schematic Doc 会丢
    (工程树变空),`git checkout -- xx.opj` 恢复;`.DSN` 同理,以 git HEAD 为准。
+7. 同名 `PAGE1` 可能来自多个已打开工程。读写前确认目标 `.opj/.dsn` 和所属设计;
+   `GetActivePage` 只标识当前页,不能单独证明它属于目标工程。
 
 ## 2. 画电路与改电路
 
 - 建页/放置/连线/属性的基础配方见 references/api-notes.md(准确签名与坐标约定)。
+- **按实验图复刻布局要先量图再定坐标**:选已知尺寸元件作标尺,按相对间距建立元件坐标/方向表;
+  每种符号先实测引脚热点偏移,不能把元件原点或另一符号的引脚位置当作热点。详细的新建与重排流程见
+  `references/api-notes.md` 的“从零画整页原理图”和“按手册图复刻全页重排”;分别核对版面比例与电气连通性。
+- **空白/只看到标题栏时先核页面几何,不要先重画或改注册表**:同时读取
+  `GetPageWidth/Height` 和 `GetDocUnits`;这两个接口的数值不可互相当作同一单位。
+  用目标工程的 page 尺寸与 `GetDocUnits` 核实物理纸面,保存后重开再回读。
+  Letter 在本机实测用 `SetPageWidth 11000` / `SetPageHeight 8500`,重开后
+  `GetDocUnits` 为 1100×850;详见 api-notes 的页面故障分诊。
+- 页面物理尺寸正确且元件/导线数量正常后,才排查视口缩放。不要用 Tcl `ZoomAll`/
+  `ZoomScale` 等命令恢复视图;本环境中曾导致 Capture 页面渲染异常。保存后可用
+  Capture 图形界面的视图工具恢复,再截图确认整页与电路都可见。
 - **改参数(R VALUE/VAMPL/别名改名)用 DBO SetEffectivePropStringValue/SetName——安全,
   多次验证**;改完 **F5** 才刷新视图,勿以屏幕判断 DB 状态。
 - **结构性修改(删元件/删线/建线)严禁 DBO 写操作**(DeleteWire/NewWireScalar/
@@ -102,7 +118,7 @@ https://github.com/wbz2006/orcad-mcp (新机器先 clone + `pip install -r requi
   报告)→ `tools\pspice\psp_cmd.exe -r file.cir` → .out/.dat。
   .PRINT TRAN V[node] 用**方括号**;.OP 出静态点。
 - **文字结果打印**(bias N.out):PSpice A/D File→Open .out → File→Print →
-  Save As 填全路径(此对话框无 Plots 列表,OK 位置也不同)。
+  再按下方的对话框检查流程处理输出路径(此对话框无 Plots 列表,OK 位置也不同)。
 - **波形打印**:默认走 `orcad_quiet.py` CLI(全消息驱动,标注 PDF 叠写);需要
   Probe 内原生标注时才用 `probe_export.py`(前台物理模式)。流程:File→Open .dat →
   Trace→Add Trace → 双坐标系:先加前 N-1 条,Plot→Add Plot to Window,再加最后一条
@@ -111,14 +127,17 @@ https://github.com/wbz2006/orcad-mcp (新机器先 clone + `pip install -r requi
 - **铁律:打印前把 Probe 关到只剩目标窗口**(Ctrl+F6 循环+Ctrl+F4)。
   打印对话框 "Plots to Print" 列表(多选)的消息选择(LB_SETSEL+LBN_SELCHANGE)
   在多窗口时不可靠,单窗口时确定。
-- **Capture 原理图打印**:激活 PAGE1(SelectPMItem+Enter)→ File→Print(该对话框
-  无 Plots 列表,OK 按钮 id=1)→ Save As。`quiet_print.py "OrCAD Capture" out.pdf`
-  一条命令完成;`quiet_cap_print.py` 是先切页再打印的示例。
-- **文字/波形打印同理可全消息驱动**:`quiet_print.py "PSpice A/D" bias.pdf` 打活动
-  子窗口;`orcad_quiet.py` CLI 负责 Probe(开关窗/加轨迹/双坐标系/打印/PDF 叠写标注)。
-- Save As 对话框:首个可见 Edit `WM_SETTEXT` 全路径 + 向对话框
-  `WM_COMMAND IDOK`(**不要按回车**,回车会抢前台);先删目标 PDF 防覆盖确认。
-- 每份 PDF 打完用 pymupdf 渲染成图核验内容(**打印内容≠屏幕所见**,必须核验)。
+- **Capture 原理图打印**:确认目标工程与 PAGE1 的 MDI 子窗口确实活动,页面尺寸/打印区域正确,
+  再走 File→Print(该对话框无 Plots 列表,OK 按钮 id=1)→ Save Print Output As。
+  打印对话框出现只证明已进入打印流程,不代表 PDF 已写出。
+- **文字/波形打印**可用 `quiet_print.py` 打活动子窗口;`orcad_quiet.py` CLI 负责 Probe
+  (开关窗/加轨迹/双坐标系/打印/PDF 叠写标注)。这些仓库脚本目前都没有在确认前回读 Save As 路径;
+  仅对已验证过的对话框自动使用。未知或 Vista 风格对话框中不要调用这些自动打印脚本,改为手动触发打印并在原生对话框输入路径。
+- 自行驱动对话框时,仅当可见 Edit 回读出的完整路径与目标一致才确认;控件不存在或回读不符时,
+  保留对话框并手动输入,不要重复触发 File→Print。使用 `capture_guard.reap` 时把预期的
+  Save As 对话框列入 `expected`,避免被当作意外弹窗关闭。
+- 每份 PDF 打完核对文件存在、非空、可打开,再用 pymupdf 渲染检查页数、页面范围和电路内容
+  (**打印内容≠屏幕所见**,必须核验)。
 
 ## 4. 学习新命令
 
@@ -139,6 +158,9 @@ https://github.com/wbz2006/orcad-mcp (新机器先 clone + `pip install -r requi
 | TCL 超时 30s | 被模态框卡住;枚举 #32770 → 读文本 → 点正确按钮 |
 | `invalid command name "\ufeffset"` | .tcl 被 PowerShell 写成 UTF-8 **带 BOM**;读时 `utf-8-sig` 或存 ASCII |
 | Command Requires SchematicView | 页面未激活:SelectPMItem + 给 SysTreeView32 PostMessage 回车 |
+| 原理图只显示放大的标题栏/边框 | 核对目标设计、`GetDocUnits` 与元件/导线计数;检查页面尺寸;再处理视口,勿先改注册表 |
+| File→Print 后没有目标 PDF | 区分未出现打印框、未出现 Save Print Output As、路径未回读、PDF 未落盘四个阶段;路径控件失败则手动输入 |
+| 窗口启动在屏幕外/最小化 | 先检查 Capture 窗口 placement 与显示器范围;这是工作区状态线索,不能据此推断 DSN 页面尺寸 |
 | 打印出来的是旧窗口 | Plots to Print 列表没选对 → **关到只剩目标窗口** |
 | 标注没进打印 | 没走 move-mode 放置;或锚点在可视区外(改量程后);安静模式改 PDF 叠写 |
 | 保存时 Capture 崩溃 | DBO 结构性写操作或 `Menu File::Save` → 原生事务 + MarkModified + Ctrl+S |
@@ -160,22 +182,6 @@ https://github.com/wbz2006/orcad-mcp (新机器先 clone + `pip install -r requi
 
 ## 从零画整页原理图 (2026-10-30 实验5 差分放大, ex5-example)
 
-- NewPlacedInst 直接从库件建实例(无需已有同类型元件):
-  $pg NewPlacedInst $st [CStr ref] [CStr $part] $symbol $dev [CPoint 0 0] $rotation,
-  其中 $symbol = $lib GetPart [CStr "$part.Normal"],$dev = [[$symbol GetPackagePtr] GetDevice 0 $st]。
-  与复制现有实例的 $dstPage NewPlacedInst $srcInst $st [CPoint] 是两个不同签名。
-- 锚点定位:先 dump 引脚(NewPinsIter→GetPinName+GetOffsetHotSpot),按锚点引脚
-  或引脚均值算偏移,SetLocation (x-ax) (y-ay) 把锚点精确放到目标坐标。
-- 镜像:$inst SetMirror $mirror(差分对左右对称件用)。
-- 引脚名大小写按符号实测:Q2N2222 是小写 b/c/e,按 B 找锚点直接报 not found。
-- SetPageWidth/SetPageHeight 单位是 doc(0.01inch):Letter = 11000/8500。
-  旧记录 SetPageWidth 1100/850 得到的 doc=110×85(0.1页)——是错的,以 08 脚本实测为准
-  (BEFORE 1100,850→doc 110,85;AFTER 11000,8500→doc 1100,850,重开保持)。
-- 地符号(Globals)锚点是热点不是 loc:PlaceGround 后 GetOffsetHotSpot 比 loc 偏
-  (+10,0),SetLocation (x-10) y 才让热点落在导线端点上;挂接成功判据 =
-  $g GetWire $st 返回非 NULL(=NULL 即悬空,别只看坐标)。
-- 核对顺序:CloseProject → Open opj → OPage → 重读 GetPartInstCount/GetWireCount/
-  GetPageWidth(重开后计数与页面尺寸不变才算落盘);打印 PDF→pymupdf 渲染对照手册图。
-- 本例工程 D:/Users/Document/OrCAD/auto/ex5-example/:编号 tcl 脚本(01~23 逐步演进)+
-  verification/session.jsonl(每步脚本/结果/错误留档)+ 最终 PDF/PNG 对照 reference-fig5-4.png。
-  新电路从零画页可整流程照抄。
+建元件、定位热点、镜像、页面设置、重开核验及本例脚本记录见
+`references/api-notes.md` 的“从零画整页原理图”。复刻其它手册图时按上方量图流程重新建立坐标表;
+不要直接照搬本例元件坐标或把本地页面参数当成 OrCAD 官方单位定义。
